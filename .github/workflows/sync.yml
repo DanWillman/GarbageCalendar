@@ -1,0 +1,24 @@
+name: Sync Garbage Schedule
+
+on:
+  schedule:
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Run script
+        run: dotnet run app.cs
+        env:
+          NEXTCLOUD_USERNAME: ${{ secrets.NEXTCLOUD_USERNAME }}
+          NEXTCLOUD_PASSWORD: ${{ secrets.NEXTCLOUD_PASSWORD }}
+          NEXTCLOUD_CALDAV_URL: ${{ secrets.NEXTCLOUD_CALDAV_URL }}
+          GARBAGE_URL: ${{ secrets.GARBAGE_URL }}
