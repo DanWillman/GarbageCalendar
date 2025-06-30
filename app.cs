@@ -1,28 +1,31 @@
-// app.cs
 using System.Net.Http;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text;
 using System.Globalization;
 
-// Config
 var nextcloudUrl = Environment.GetEnvironmentVariable("NEXTCLOUD_CALDAV_URL")!;
 var username = Environment.GetEnvironmentVariable("NEXTCLOUD_USERNAME")!;
 var password = Environment.GetEnvironmentVariable("NEXTCLOUD_PASSWORD")!;
-var calendarName = "garbage";
-var addressUrl = Environment.GetEnvironmentVariable("GARBAGE_URL");
+var addressUrl = Environment.GetEnvironmentVariable("GARBAGE_URL")!;
 
-// Fetch JSON
 using var http = new HttpClient();
+
+// Fetch and log JSON
 var json = await http.GetStringAsync(addressUrl);
+Console.WriteLine("Collection API Response:");
+Console.WriteLine(json);
 var doc = JsonNode.Parse(json)!;
 
-string? ParseDate(string input) =>
-    DateTime.TryParseExact(input, "dddd MMMM d, yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
-        ? dt.ToString("yyyyMMdd")
-        : null;
+// Parse Date
+DateTime? ParseDate(string input)
+{
+    if (DateTime.TryParseExact(input, "dddd MMMM d, yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+        return dt;
+    return null;
+}
 
-string IcsEvent(string uid, string date, string summary) => $"""
+// ICS Generator
+string IcsEvent(string uid, DateTime start, DateTime end, string summary) => $"""
 BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Garbage Schedule//
@@ -30,29 +33,29 @@ BEGIN:VEVENT
 UID:{uid}
 DTSTAMP:{DateTime.UtcNow:yyyyMMddTHHmmssZ}
 SUMMARY:{summary}
-DTSTART;VALUE=DATE:{date}
-DTEND;VALUE=DATE:{date}
+DTSTART;TZID=UTC:{start:yyyyMMddTHHmmssZ}
+DTEND;TZID=UTC:{end:yyyyMMddTHHmmssZ}
 END:VEVENT
 END:VCALENDAR
 """;
-
-// Garbage
-var garbage = doc["garbage"];
-var recycling = doc["recycling"];
 
 async Task UploadEvent(JsonNode? node, string label)
 {
     if (node is null || node["is_determined"]?.GetValue<bool>() != true) return;
 
     var rawDate = node["date"]?.GetValue<string>();
-    var parsedDate = rawDate is null ? null : ParseDate(rawDate);
-    if (parsedDate is null) return;
+    var date = rawDate is null ? null : ParseDate(rawDate);
+    if (date is null) return;
 
-    var uid = $"{label.ToLower()}-{parsedDate}@garbage.sync";
-    var ics = IcsEvent(uid, parsedDate, $"{label} Pickup");
+    var start = date.Value.AddDays(-1).Date.AddHours(21); // 9:00 PM previous day
+    var end = date.Value.Date.AddHours(9);               // 9:00 AM day of
+
+    var uid = $"{label.ToLower()}-{date:yyyyMMdd}@garbage.sync";
+    var ics = IcsEvent(uid, start, end, $"{label} Pickup");
 
     var eventUri = $"{nextcloudUrl.TrimEnd('/')}/{uid}.ics";
     var content = new StringContent(ics, Encoding.UTF8, "text/calendar");
+
     var byteArray = Encoding.ASCII.GetBytes($"{username}:{password}");
     http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(byteArray));
 
@@ -60,5 +63,5 @@ async Task UploadEvent(JsonNode? node, string label)
     Console.WriteLine($"{label} upload: {(int)response.StatusCode} {response.ReasonPhrase}");
 }
 
-await UploadEvent(garbage, "Garbage");
-await UploadEvent(recycling, "Recycling");
+await UploadEvent(doc["garbage"], "Garbage");
+await UploadEvent(doc["recycling"], "Recycling");
